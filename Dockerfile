@@ -1,47 +1,90 @@
-# FROM –   BASE IMAGE FROM REPOSITORY
-# WORKDIR – container 工作目錄
-# COPY– 將本地端資料複製到container裡
-# EXPOSE – open container port
-# Run  --  build image  中執行的 cmd
-# CMD –  build container 執行cmd
+#
+# NOTE: THIS DOCKERFILE IS GENERATED VIA "update.sh"
+#
+# PLEASE DO NOT EDIT IT DIRECTLY.
+#
 
-#Dockerfile.jupyter-python-ultra-pack
+FROM buildpack-deps:stretch
 
-FROM Wen-Hsuan/Docker
+# ensure local python is preferred over distribution python
+ENV PATH /usr/local/bin:$PATH
 
-WORKDIR /jupyter
+# http://bugs.python.org/issue19846
+# > At the moment, setting "LANG=C" on a Linux system *fundamentally breaks Python 3*, and that's not OK.
+ENV LANG C.UTF-8
 
-RUN yum install -y gcc gcc-c++ git make
+# extra dependencies (over what buildpack-deps already includes)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+		tk-dev \
+		uuid-dev \
+	&& rm -rf /var/lib/apt/lists/*
 
-RUN conda create -y -n py3 python=3 anaconda && \
-    source activate py3 && \
-    conda install -y ipykernel && \
-    ipython kernel install --user && \
-    # unixodbc is removed from anaconda. if not, the teradata package in anaconda wouldn't work
-    conda uninstall -y unixodbc && \
-    conda install -y teradata=15.10.0.20 && \
+ENV GPG_KEY 0D96DF4D4110E5C43FBFB17F2D347EA6AA65421D
+ENV PYTHON_VERSION 3.7.0
 
-    conda create -y -n py2 python=2 anaconda && \
-    source activate py2 && \
-    conda install -y ipykernel && \
-    ipython kernel install --user && \
-    # unixodbc is removed from anaconda. if not, the teradata package in anaconda wouldn't work
-    conda uninstall -y unixodbc && \
-    conda install -y teradata=15.10.0.20 && \
-    conda clean -y --all
+RUN set -ex \
+	\
+	&& wget -O python.tar.xz "https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz" \
+	&& wget -O python.tar.xz.asc "https://www.python.org/ftp/python/${PYTHON_VERSION%%[a-z]*}/Python-$PYTHON_VERSION.tar.xz.asc" \
+	&& export GNUPGHOME="$(mktemp -d)" \
+	&& gpg --keyserver ha.pool.sks-keyservers.net --recv-keys "$GPG_KEY" \
+	&& gpg --batch --verify python.tar.xz.asc python.tar.xz \
+	&& { command -v gpgconf > /dev/null && gpgconf --kill all || :; } \
+	&& rm -rf "$GNUPGHOME" python.tar.xz.asc \
+	&& mkdir -p /usr/src/python \
+	&& tar -xJC /usr/src/python --strip-components=1 -f python.tar.xz \
+	&& rm python.tar.xz \
+	\
+	&& cd /usr/src/python \
+	&& gnuArch="$(dpkg-architecture --query DEB_BUILD_GNU_TYPE)" \
+	&& ./configure \
+		--build="$gnuArch" \
+		--enable-loadable-sqlite-extensions \
+		--enable-shared \
+		--with-system-expat \
+		--with-system-ffi \
+		--without-ensurepip \
+	&& make -j "$(nproc)" \
+	&& make install \
+	&& ldconfig \
+	\
+	&& find /usr/local -depth \
+		\( \
+			\( -type d -a \( -name test -o -name tests \) \) \
+			-o \
+			\( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
+		\) -exec rm -rf '{}' + \
+	&& rm -rf /usr/src/python \
+	\
+	&& python3 --version
 
-# Install xgboost
-RUN cd /opt && \
-    git clone --recursive https://github.com/dmlc/xgboost && \
-    cd xgboost && \
-    git submodule init && \
-    git submodule update && \
-    ./build.sh && \
-    cd python-package && \
-    source activate py3 && python setup.py install && \
-    source activate py2 && python setup.py install && \
-    cd / && \
-    rm -rf /opt/xgboost
+# make some useful symlinks that are expected to exist
+RUN cd /usr/local/bin \
+	&& ln -s idle3 idle \
+	&& ln -s pydoc3 pydoc \
+	&& ln -s python3 python \
+	&& ln -s python3-config python-config
 
-CMD source activate py3 && \
-    jupyter notebook --ip='*' --port=8888 --NotebookApp.token='' --allow-root --no-browser
+# if this is called "PIP_VERSION", pip explodes with "ValueError: invalid truth value '<VERSION>'"
+ENV PYTHON_PIP_VERSION 18.0
+
+RUN set -ex; \
+	\
+	wget -O get-pip.py 'https://bootstrap.pypa.io/get-pip.py'; \
+	\
+	python get-pip.py \
+		--disable-pip-version-check \
+		--no-cache-dir \
+		"pip==$PYTHON_PIP_VERSION" \
+	; \
+	pip --version; \
+	\
+	find /usr/local -depth \
+		\( \
+			\( -type d -a \( -name test -o -name tests \) \) \
+			-o \
+			\( -type f -a \( -name '*.pyc' -o -name '*.pyo' \) \) \
+		\) -exec rm -rf '{}' +; \
+	rm -f get-pip.py
+
+CMD ["python3"]
