@@ -1,3 +1,11 @@
+# FROM –   BASE IMAGE FROM REPOSITORY
+# WORKDIR – container 工作目錄
+# COPY– 將本地端資料複製到container裡
+# EXPOSE – open container port
+# Run  --  build image  中執行的 cmd
+# CMD –  build container 執行cmd
+
+
 FROM raychee/python3
 
 COPY tdodbc1510__linux_indep.15.10.01.05-1.tar.gz /opt/teradata_install/
